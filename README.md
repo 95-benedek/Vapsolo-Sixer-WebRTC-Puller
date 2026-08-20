@@ -61,11 +61,11 @@ Type in "allow pasting" , press enter,
 
 When you inject it, two console warns should pop up:
 
-⚠️ made by: 95.benedek._ (Koid), have fun using it! ;)
-⚠️ Discord: 95.benedek._
+- ⚠️ made by: 95.benedek._ (Koid), have fun using it! ;)
+- ⚠️ Discord: 95.benedek._
 
 If you see THAT, that means you successfully injected it, and it's ready to use. You can drag it around wherever you want to put it. 
-After it, Press "Start" (in OmeTV / Chatalternative / Omegle), and it'll start to work.
+After it, Press "Start" (in OmeTV / Chat alternative / Omegle), and it'll start to work.
 
 Use it on your own responsibility. The UDP-Koid part will not be released for a while, because I don't want people to DoS eachother.
 If you have any more questions, or how to inject this tool into your WEB browser on your PC/Laptop, please contact me on:
