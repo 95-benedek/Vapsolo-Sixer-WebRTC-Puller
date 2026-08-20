@@ -24,7 +24,7 @@ UDP-Koid is a DoS tool where if provided the specific command*, it starts to flo
 
 ⚠️ **IMPORTANT NOTE:** The UDP-Koid script isn't included with this for obvious reasons - I don't want anyone to DoS anyone with it on OmeTV for fun, and we didn't mention revenge yet. DoS-ing isn't cool, please don't do it.
 
-*: udp-koid <ipv4> <udp-port> <duration(in sec)>
+*: udp-koid (ipv4) (port) (duration in sec)
 
 **(2):**
 
